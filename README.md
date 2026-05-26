@@ -42,7 +42,9 @@ it is not the recommended production engine today. Keep production on
 | Class 1/2/3 poll buttons | Mapped to integrity poll in native runtime |
 | Data point table | Implemented |
 | Master traffic tab | Implemented as runtime/application events, not raw DNP3 frame capture |
+| Global Traffic module | Implemented as operational overview |
 | Master log tab | Implemented |
+| Settings module | Implemented as server capability/status view |
 | Demo TCP Outstation | Implemented in native runtime |
 | Configurable demo outstation points | Implemented |
 | Public production outstation management restriction | Implemented via server capabilities |
@@ -219,8 +221,8 @@ Example response fields:
   "modules": {
     "masters": true,
     "outstations": false,
-    "traffic": false,
-    "settings": false
+    "traffic": true,
+    "settings": true
   }
 }
 ```

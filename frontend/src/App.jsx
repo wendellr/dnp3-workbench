@@ -8,6 +8,8 @@ import SettingsIcon from '@mui/icons-material/Settings'
 import ClientListPanel from './components/ClientListPanel'
 import ClientWorkspace from './components/ClientWorkspace'
 import OutstationsPanel from './components/OutstationsPanel'
+import TrafficPanel from './components/TrafficPanel'
+import SettingsPanel from './components/SettingsPanel'
 import { api } from './services/api'
 
 export default function App() {
@@ -79,8 +81,8 @@ export default function App() {
   const modules = [
     { id: 'masters', label: 'Masters', icon: <HubIcon fontSize="small" />, disabled: false },
     { id: 'outstations', label: 'Outstations', icon: <DnsIcon fontSize="small" />, disabled: !moduleFlags.outstations, restricted: capabilities && !moduleFlags.outstations },
-    { id: 'traffic', label: 'Traffic', icon: <RouteIcon fontSize="small" />, disabled: !moduleFlags.traffic },
-    { id: 'settings', label: 'Settings', icon: <SettingsIcon fontSize="small" />, disabled: !moduleFlags.settings },
+    { id: 'traffic', label: 'Traffic', icon: <RouteIcon fontSize="small" />, disabled: capabilities ? !moduleFlags.traffic : false },
+    { id: 'settings', label: 'Settings', icon: <SettingsIcon fontSize="small" />, disabled: capabilities ? !moduleFlags.settings : false },
   ]
 
   return (
@@ -146,6 +148,10 @@ export default function App() {
             )
           ) : activeModule === 'outstations' ? (
             <OutstationsPanel />
+          ) : activeModule === 'traffic' ? (
+            <TrafficPanel masters={masters} />
+          ) : activeModule === 'settings' ? (
+            <SettingsPanel capabilities={capabilities} />
           ) : null}
         </Box>
       </Box>

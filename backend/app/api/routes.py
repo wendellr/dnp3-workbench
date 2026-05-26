@@ -57,8 +57,8 @@ async def get_capabilities():
         "modules": {
             "masters": True,
             "outstations": settings.ENABLE_DEMO_OUTSTATION and settings.ENABLE_PUBLIC_OUTSTATION_MANAGEMENT,
-            "traffic": False,
-            "settings": False,
+            "traffic": True,
+            "settings": True,
         },
     }
 
