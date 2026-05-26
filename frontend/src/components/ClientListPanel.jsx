@@ -44,9 +44,18 @@ export default function ClientListPanel({ clients, selectedClientId, onSelect, o
             </ListItemIcon>
             <ListItemText
               primary={client.name}
-              secondary={`${client.comm_mode.toUpperCase()} | ${client.tcp_config?.ip_address || '127.0.0.1'}:${client.tcp_config?.port || 20000} | OS ${client.outstation_address}`}
+              secondary={(
+                <Box component="span" sx={{ display: 'block', lineHeight: 1.25 }}>
+                  <Box component="span" sx={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {client.comm_mode.toUpperCase()} {client.tcp_config?.ip_address || '127.0.0.1'}:{client.tcp_config?.port || 20000}
+                  </Box>
+                  <Box component="span" sx={{ display: 'block', color: '#6b7280' }}>
+                    Master {client.master_address} / Outstation {client.outstation_address}
+                  </Box>
+                </Box>
+              )}
               primaryTypographyProps={{ fontSize: 13, fontWeight: 500 }}
-              secondaryTypographyProps={{ fontSize: 11 }}
+              secondaryTypographyProps={{ component: 'div', fontSize: 11 }}
             />
             <FiberManualRecordIcon
               sx={{ fontSize: 10, color: stateColors[client.state] || '#bdbdbd', mr: 0.5 }}
