@@ -1,0 +1,48 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: dnp3-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - APP_ENV=${APP_ENV:-development}
+      - DNP3_ENGINE=${DNP3_ENGINE:-simulated}
+      - DNP3_MASTER_RUNTIME_BASE_URL=http://dnp3-master-runtime:21200
+      - ENABLE_DEMO_OUTSTATION=${ENABLE_DEMO_OUTSTATION:-true}
+      - ENABLE_PUBLIC_OUTSTATION_MANAGEMENT=${ENABLE_PUBLIC_OUTSTATION_MANAGEMENT:-true}
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    container_name: dnp3-frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    environment:
+      - VITE_API_URL=http://localhost:8000/api
+    restart: unless-stopped
+
+  dnp3-master-runtime:
+    build:
+      context: ./services/dnp3-master-runtime
+      dockerfile: Dockerfile
+      args:
+        ENABLE_OPENDNP3: ${DNP3_MASTER_RUNTIME_BUILD_ENABLE_OPENDNP3:-OFF}
+    container_name: dnp3-master-runtime
+    profiles: ["dnp3-master-runtime"]
+    ports:
+      - "${DNP3_MASTER_RUNTIME_HTTP_PORT:-21200}:21200"
+    environment:
+      - DNP3_MASTER_RUNTIME_HTTP_PORT=21200
+    restart: unless-stopped

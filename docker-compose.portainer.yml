@@ -1,0 +1,40 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend.prod
+    container_name: dnp3-backend
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - APP_VERSION=${APP_VERSION:-1.0.0}
+      - PYTHONUNBUFFERED=1
+      - DNP3_ENGINE=${DNP3_ENGINE:-native_opendnp3}
+      - DNP3_MASTER_RUNTIME_BASE_URL=${DNP3_MASTER_RUNTIME_BASE_URL:-http://dnp3-master-runtime:21200}
+      - ENABLE_DEMO_OUTSTATION=${ENABLE_DEMO_OUTSTATION:-true}
+      - ENABLE_PUBLIC_OUTSTATION_MANAGEMENT=${ENABLE_PUBLIC_OUTSTATION_MANAGEMENT:-false}
+      - CORS_ORIGINS=${CORS_ORIGINS:-["https://dnp3.ioda.com.br"]}
+    depends_on:
+      - dnp3-master-runtime
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend.prod
+    container_name: dnp3-frontend
+    ports:
+      - "${FRONTEND_HTTP_PORT:-8080}:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  dnp3-master-runtime:
+    build:
+      context: ./services/dnp3-master-runtime
+      dockerfile: Dockerfile
+      args:
+        ENABLE_OPENDNP3: ${DNP3_MASTER_RUNTIME_BUILD_ENABLE_OPENDNP3:-ON}
+    container_name: dnp3-master-runtime
+    environment:
+      - DNP3_MASTER_RUNTIME_HTTP_PORT=21200
+    restart: unless-stopped
