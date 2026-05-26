@@ -126,6 +126,10 @@ Reference: main
 Compose path: docker-compose.portainer.yml
 ```
 
+Do not use `docker-compose.yml` for the public Portainer deployment. That file
+is for local development and publishes backend port `8000` by default. The
+production file publishes only the frontend Nginx port.
+
 Set these environment variables in the Portainer stack:
 
 ```bash
@@ -340,6 +344,8 @@ Important runtime endpoints:
 | `ENABLE_PUBLIC_OUTSTATION_MANAGEMENT` | `true` in dev, `false` in production | Controls public start/stop/edit actions |
 | `CORS_ORIGINS` | local dev origins | Use JSON list syntax, e.g. `["https://dnp3.ioda.com.br"]` |
 | `FRONTEND_HTTP_PORT` | `8080` in production example | Host port for frontend Nginx |
+| `BACKEND_HTTP_PORT` | `8000` in development compose only | Change only if using `docker-compose.yml` locally and port `8000` is occupied |
+| `FRONTEND_DEV_PORT` | `5173` in development compose only | Change only if using `docker-compose.yml` locally and port `5173` is occupied |
 
 ## Health Checks And Diagnostics
 
