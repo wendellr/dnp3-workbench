@@ -37,10 +37,16 @@ class TimeoutConfigSchema(BaseModel):
 
 
 class CreateMasterRequest(BaseModel):
+    id: Optional[str] = None
     name: str = "New Master"
     comm_mode: CommMode = CommMode.TCP
     master_address: int = 1
     outstation_address: int = 2
+    serial_config: Optional[SerialConfigSchema] = None
+    tcp_config: Optional[TcpConfigSchema] = None
+    udp_config: Optional[UdpConfigSchema] = None
+    polling_config: Optional[PollingConfigSchema] = None
+    timeout_config: Optional[TimeoutConfigSchema] = None
 
 
 class UpdateMasterConfigRequest(BaseModel):

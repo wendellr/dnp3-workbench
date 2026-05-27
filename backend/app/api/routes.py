@@ -44,6 +44,15 @@ def require_public_outstation_management():
         raise HTTPException(status_code=403, detail="Public outstation management is restricted in this environment")
 
 
+def nested_create_updates(req: CreateMasterRequest) -> dict:
+    updates = {}
+    for key in ["serial_config", "tcp_config", "udp_config", "polling_config", "timeout_config"]:
+        value = getattr(req, key, None)
+        if value is not None:
+            updates[key] = value.model_dump() if hasattr(value, "model_dump") else value.__dict__
+    return updates
+
+
 # --- Server Capabilities ---
 
 @router.get("/capabilities")
@@ -67,14 +76,12 @@ async def get_capabilities():
 
 @router.get("/clients")
 async def list_clients():
-    masters = master_manager.get_all_masters()
-    return [master_to_response(m) for m in masters]
+    return []
 
 
 @router.get("/masters")
 async def list_masters():
-    masters = master_manager.get_all_masters()
-    return [master_to_response(m) for m in masters]
+    return []
 
 
 @router.post("/clients")
@@ -82,8 +89,12 @@ async def create_client(req: CreateMasterRequest):
     try:
         master = master_manager.create_master(
             name=req.name, comm_mode=req.comm_mode,
-            master_address=req.master_address, outstation_address=req.outstation_address
+            master_address=req.master_address, outstation_address=req.outstation_address,
+            master_id=req.id,
         )
+        updates = nested_create_updates(req)
+        if updates:
+            master = master_manager.update_master_config(master.id, updates) or master
         return master_to_response(master)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -94,8 +105,12 @@ async def create_master(req: CreateMasterRequest):
     try:
         master = master_manager.create_master(
             name=req.name, comm_mode=req.comm_mode,
-            master_address=req.master_address, outstation_address=req.outstation_address
+            master_address=req.master_address, outstation_address=req.outstation_address,
+            master_id=req.id,
         )
+        updates = nested_create_updates(req)
+        if updates:
+            master = master_manager.update_master_config(master.id, updates) or master
         return master_to_response(master)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

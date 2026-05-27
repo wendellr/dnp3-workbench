@@ -26,17 +26,21 @@ class MasterManager:
         self.poll_tasks: dict[str, asyncio.Task] = {}
 
     def create_master(self, name: str = "New Master", comm_mode: CommMode = CommMode.TCP,
-                      master_address: int = 1, outstation_address: int = 2) -> DNP3Master:
+                      master_address: int = 1, outstation_address: int = 2,
+                      master_id: str | None = None) -> DNP3Master:
         """Create a new DNP3 master."""
         if len(self.masters) >= 50:
             raise ValueError("Maximum 50 masters allowed")
 
-        master = DNP3Master(
-            name=name,
-            comm_mode=comm_mode,
-            master_address=master_address,
-            outstation_address=outstation_address,
-        )
+        master_kwargs = {
+            "name": name,
+            "comm_mode": comm_mode,
+            "master_address": master_address,
+            "outstation_address": outstation_address,
+        }
+        if master_id:
+            master_kwargs["id"] = master_id
+        master = DNP3Master(**master_kwargs)
         self.masters[master.id] = master
         return master
 
