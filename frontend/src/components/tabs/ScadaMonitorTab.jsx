@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
-  Box, Button, Chip, FormControl, IconButton, InputLabel, MenuItem, Paper,
+  Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, IconButton, InputLabel, MenuItem, Paper,
   Select, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   TextField, Tooltip, Typography
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
+import EditIcon from '@mui/icons-material/Edit'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { api, createMasterWebSocket } from '../../services/api'
 
@@ -20,10 +21,26 @@ const groupNames = {
 }
 
 const pointKey = (point) => `${point.group}:${point.variation}:${point.index}:${point.source_type || ''}`
+const analogGroups = new Set([30, 40])
+const historyWindowMs = 30 * 60 * 1000
 
 const formatPointLabel = (point) => (
   point.alias || `${point.source_type || groupNames[point.group] || 'Point'} ${point.index}`
 )
+
+const defaultPointMeta = (point) => ({
+  name: formatPointLabel(point),
+  semantic: point.description || groupNames[point.group] || '',
+  unit: '',
+  min: '',
+  max: '',
+})
+
+const numericValue = (value) => {
+  if (value === null || value === undefined || value === '') return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
 
 const valueColor = (point) => {
   if ([1, 3, 10].includes(point.group)) {
@@ -36,6 +53,7 @@ const valueColor = (point) => {
 
 export default function ScadaMonitorTab({ client }) {
   const storageKey = `dnp3.scada.points.${client.id}`
+  const metadataKey = `dnp3.scada.metadata.${client.id}`
   const [points, setPoints] = useState(client.data_points || [])
   const [selectedKeys, setSelectedKeys] = useState(() => {
     try {
@@ -44,12 +62,48 @@ export default function ScadaMonitorTab({ client }) {
       return []
     }
   })
+  const [metadata, setMetadata] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(metadataKey) || '{}')
+    } catch {
+      return {}
+    }
+  })
+  const [history, setHistory] = useState({})
+  const [editingPoint, setEditingPoint] = useState(null)
   const [groupFilter, setGroupFilter] = useState('all')
   const [search, setSearch] = useState('')
 
+  const recordHistory = (nextPoints) => {
+    const now = Date.now()
+    const cutoff = now - historyWindowMs
+    setHistory(prev => {
+      const next = {}
+      for (const [key, samples] of Object.entries(prev)) {
+        const kept = samples.filter(sample => sample.t >= cutoff)
+        if (kept.length) next[key] = kept
+      }
+
+      nextPoints.forEach(point => {
+        if (!analogGroups.has(point.group)) return
+        const value = numericValue(point.value)
+        if (value === null) return
+        const key = pointKey(point)
+        const samples = next[key] || []
+        const last = samples[samples.length - 1]
+        if (!last || last.value !== value || now - last.t > 5000) {
+          next[key] = [...samples, { t: now, value }].filter(sample => sample.t >= cutoff)
+        }
+      })
+      return next
+    })
+  }
+
   const fetchPoints = async () => {
     try {
-      setPoints(await api.getMasterDataPoints(client.id))
+      const nextPoints = await api.getMasterDataPoints(client.id)
+      setPoints(nextPoints)
+      recordHistory(nextPoints)
     } catch (err) {
       console.error('Failed to fetch SCADA monitor points:', err)
     }
@@ -62,10 +116,15 @@ export default function ScadaMonitorTab({ client }) {
   }, [selectedKeys, storageKey])
 
   useEffect(() => {
+    localStorage.setItem(metadataKey, JSON.stringify(metadata))
+  }, [metadata, metadataKey])
+
+  useEffect(() => {
     const ws = createMasterWebSocket(client.id, 'data')
     ws.onmessage = (event) => {
       const nextPoints = JSON.parse(event.data)
       setPoints(nextPoints)
+      recordHistory(nextPoints)
     }
     return () => ws.close()
   }, [client.id])
@@ -82,9 +141,12 @@ export default function ScadaMonitorTab({ client }) {
 
   const uniqueGroups = [...new Set(points.map(point => point.group))].sort((a, b) => a - b)
 
+  const pointMeta = (point) => metadata[pointKey(point)] || defaultPointMeta(point)
+
   const filteredPoints = points.filter(point => {
     const matchesGroup = groupFilter === 'all' || point.group === Number(groupFilter)
-    const haystack = `${point.index} ${point.group} ${point.variation} ${point.source_type} ${point.description} ${point.value}`.toLowerCase()
+    const meta = pointMeta(point)
+    const haystack = `${point.index} ${point.group} ${point.variation} ${point.source_type} ${point.description} ${point.value} ${meta.name} ${meta.semantic} ${meta.unit}`.toLowerCase()
     return matchesGroup && haystack.includes(search.toLowerCase())
   })
 
@@ -98,7 +160,65 @@ export default function ScadaMonitorTab({ client }) {
     setSelectedKeys(prev => prev.filter(item => item !== key))
   }
 
+  const saveMetadata = () => {
+    if (!editingPoint) return
+    const key = pointKey(editingPoint.point)
+    setMetadata(prev => ({
+      ...prev,
+      [key]: editingPoint.meta,
+    }))
+    setEditingPoint(null)
+  }
+
+  const renderAnalogHistory = (point) => {
+    if (!analogGroups.has(point.group)) return null
+
+    const key = pointKey(point)
+    const samples = history[key] || []
+    const value = numericValue(point.value)
+    if (!samples.length && value === null) return null
+
+    const meta = pointMeta(point)
+    const values = samples.map(sample => sample.value)
+    if (value !== null) values.push(value)
+    const configuredMin = numericValue(meta.min)
+    const configuredMax = numericValue(meta.max)
+    const min = configuredMin ?? Math.min(...values)
+    const max = configuredMax ?? Math.max(...values)
+    const span = Math.max(max - min, 1)
+    const bars = samples.slice(-72)
+
+    return (
+      <Box sx={{ mt: 1.1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'end', gap: 0.35, height: 38, borderBottom: '1px solid #d1d5db' }}>
+          {bars.map(sample => {
+            const height = Math.max(4, Math.min(36, ((sample.value - min) / span) * 34 + 4))
+            return (
+              <Box
+                key={`${sample.t}-${sample.value}`}
+                sx={{
+                  flex: '1 1 3px',
+                  minWidth: 2,
+                  height,
+                  bgcolor: '#2563eb',
+                  opacity: 0.72,
+                  borderRadius: '2px 2px 0 0',
+                }}
+              />
+            )
+          })}
+        </Box>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 0.35 }}>
+          <Typography sx={{ fontSize: 10, color: '#6b7280' }}>{min.toFixed(2)}{meta.unit ? ` ${meta.unit}` : ''}</Typography>
+          <Typography sx={{ fontSize: 10, color: '#6b7280' }}>30 min</Typography>
+          <Typography sx={{ fontSize: 10, color: '#6b7280' }}>{max.toFixed(2)}{meta.unit ? ` ${meta.unit}` : ''}</Typography>
+        </Box>
+      </Box>
+    )
+  }
+
   return (
+    <>
     <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '360px 1fr' }, gap: 1.5 }}>
       <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 1 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, gap: 1 }}>
@@ -144,8 +264,11 @@ export default function ScadaMonitorTab({ client }) {
                 return (
                   <TableRow key={key} hover selected={selected}>
                     <TableCell sx={{ fontSize: 11 }}>
-                      <Box sx={{ fontWeight: 700 }}>{formatPointLabel(point)}</Box>
+                      <Box sx={{ fontWeight: 700 }}>{pointMeta(point).name}</Box>
                       <Box sx={{ color: '#6b7280' }}>G{point.group}V{point.variation} I{point.index}</Box>
+                      {pointMeta(point).semantic && (
+                        <Box sx={{ color: '#4b5563' }}>{pointMeta(point).semantic}</Box>
+                      )}
                     </TableCell>
                     <TableCell sx={{ fontSize: 11, fontFamily: 'monospace' }}>{point.value}</TableCell>
                     <TableCell align="right">
@@ -178,12 +301,25 @@ export default function ScadaMonitorTab({ client }) {
               <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
                 <Box sx={{ minWidth: 0, flex: 1 }}>
                   <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#111827' }} noWrap>
-                    {formatPointLabel(point)}
+                    {pointMeta(point).name}
                   </Typography>
                   <Typography sx={{ fontSize: 11, color: '#6b7280' }}>
                     G{point.group}V{point.variation} · Index {point.index} · {point.source_type || 'unknown'}
                   </Typography>
+                  {pointMeta(point).semantic && (
+                    <Typography sx={{ fontSize: 11, color: '#374151', mt: 0.25 }} noWrap>
+                      {pointMeta(point).semantic}
+                    </Typography>
+                  )}
                 </Box>
+                <Tooltip title="Edit context">
+                  <IconButton
+                    size="small"
+                    onClick={() => setEditingPoint({ point, meta: { ...defaultPointMeta(point), ...pointMeta(point) } })}
+                  >
+                    <EditIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
                 <Tooltip title="Remove">
                   <IconButton size="small" onClick={() => removePoint(point)}>
                     <DeleteIcon fontSize="small" />
@@ -191,8 +327,9 @@ export default function ScadaMonitorTab({ client }) {
                 </Tooltip>
               </Box>
               <Typography sx={{ mt: 1, fontSize: 30, lineHeight: 1.1, fontWeight: 800, color: valueColor(point), fontFamily: 'monospace' }}>
-                {String(point.value)}
+                {String(point.value)}{pointMeta(point).unit ? ` ${pointMeta(point).unit}` : ''}
               </Typography>
+              {renderAnalogHistory(point)}
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mt: 1 }}>
                 <Chip label={point.quality || 'quality'} size="small" variant="outlined" sx={{ height: 20, fontSize: 10 }} />
                 <Typography sx={{ fontSize: 10.5, color: '#6b7280' }} noWrap>{point.timestamp || '-'}</Typography>
@@ -216,5 +353,49 @@ export default function ScadaMonitorTab({ client }) {
         )}
       </Box>
     </Box>
+    <Dialog open={Boolean(editingPoint)} onClose={() => setEditingPoint(null)} maxWidth="xs" fullWidth>
+      <DialogTitle sx={{ fontSize: 16, fontWeight: 700 }}>Point Context</DialogTitle>
+      <DialogContent sx={{ pt: 1, display: 'grid', gap: 1.25 }}>
+        <TextField
+          size="small"
+          label="Name"
+          value={editingPoint?.meta.name || ''}
+          onChange={event => setEditingPoint(prev => ({ ...prev, meta: { ...prev.meta, name: event.target.value } }))}
+        />
+        <TextField
+          size="small"
+          label="Semantic"
+          value={editingPoint?.meta.semantic || ''}
+          onChange={event => setEditingPoint(prev => ({ ...prev, meta: { ...prev.meta, semantic: event.target.value } }))}
+        />
+        <TextField
+          size="small"
+          label="Unit"
+          value={editingPoint?.meta.unit || ''}
+          onChange={event => setEditingPoint(prev => ({ ...prev, meta: { ...prev.meta, unit: event.target.value } }))}
+        />
+        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
+          <TextField
+            size="small"
+            label="Min"
+            type="number"
+            value={editingPoint?.meta.min || ''}
+            onChange={event => setEditingPoint(prev => ({ ...prev, meta: { ...prev.meta, min: event.target.value } }))}
+          />
+          <TextField
+            size="small"
+            label="Max"
+            type="number"
+            value={editingPoint?.meta.max || ''}
+            onChange={event => setEditingPoint(prev => ({ ...prev, meta: { ...prev.meta, max: event.target.value } }))}
+          />
+        </Box>
+      </DialogContent>
+      <DialogActions>
+        <Button size="small" onClick={() => setEditingPoint(null)}>Cancel</Button>
+        <Button size="small" variant="contained" onClick={saveMetadata}>Save</Button>
+      </DialogActions>
+    </Dialog>
+    </>
   )
 }
