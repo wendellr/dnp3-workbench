@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import {
   Box, Grid, TextField, Select, MenuItem, FormControl, InputLabel,
-  Typography, Button, Divider, Paper
+  Typography, Button, Paper, Snackbar, Alert
 } from '@mui/material'
 import SaveIcon from '@mui/icons-material/Save'
 import { api } from '../../services/api'
@@ -17,6 +17,8 @@ export default function CommConfigTab({ client, onUpdated }) {
     udp_config: { ...client.udp_config },
     timeout_config: { ...client.timeout_config },
   })
+  const [saving, setSaving] = useState(false)
+  const [toast, setToast] = useState(null)
 
   const update = (path, value) => {
     setConfig(prev => {
@@ -32,11 +34,19 @@ export default function CommConfigTab({ client, onUpdated }) {
   }
 
   const handleSave = async () => {
+    setSaving(true)
     try {
       const updated = await api.updateMasterConfig(client.id, config)
       onUpdated(updated)
+      setToast({ severity: 'success', message: 'Connection configuration saved.' })
     } catch (err) {
       console.error('Save failed:', err)
+      setToast({
+        severity: 'error',
+        message: err.response?.data?.detail || err.message || 'Failed to save connection configuration.',
+      })
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -44,8 +54,8 @@ export default function CommConfigTab({ client, onUpdated }) {
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
         <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Master Connection Configuration</Typography>
-        <Button startIcon={<SaveIcon />} variant="contained" size="small" onClick={handleSave}>
-          Save
+        <Button startIcon={<SaveIcon />} variant="contained" size="small" onClick={handleSave} disabled={saving}>
+          {saving ? 'Saving...' : 'Save'}
         </Button>
       </Box>
 
@@ -208,6 +218,16 @@ export default function CommConfigTab({ client, onUpdated }) {
           </Paper>
         </Grid>
       </Grid>
+      <Snackbar
+        open={Boolean(toast)}
+        autoHideDuration={5000}
+        onClose={() => setToast(null)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+      >
+        <Alert severity={toast?.severity || 'info'} onClose={() => setToast(null)} sx={{ maxWidth: 520 }}>
+          {toast?.message}
+        </Alert>
+      </Snackbar>
     </Box>
   )
 }
