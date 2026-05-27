@@ -38,6 +38,8 @@ it is not the recommended production engine today. Keep production on
 | TCP Master using OpenDNP3 | Implemented |
 | Master connection state detection | Implemented |
 | Master detects stopped/offline outstation | Implemented |
+| Automatic integrity polling | Implemented using configured interval |
+| Reconnect grace window before error state | Implemented |
 | Integrity poll | Implemented for native TCP |
 | Class 1/2/3 poll buttons | Mapped to integrity poll in native runtime |
 | Data point table | Implemented |
@@ -236,9 +238,14 @@ Example response fields:
 5. Run an Integrity Poll.
 6. Inspect Data Points, Traffic, and Log tabs.
 
-If the target outstation stops or the TCP channel closes, the backend monitor
-marks the Master as `error`. The frontend refreshes the Master list
-periodically, so the state change appears without a manual page reload.
+While connected, the backend runs automatic integrity polls using the configured
+Integrity Poll Interval. The minimum effective interval is 5 seconds.
+
+If the target outstation stops or the TCP channel closes, the backend first
+marks the Master as `connecting` and gives OpenDNP3 a reconnect grace window. If
+the channel reopens, the Master returns to `connected`; if it remains closed,
+the Master moves to `error`. The frontend refreshes the Master list
+periodically, so state changes appear without a manual page reload.
 
 ## Demo Outstation Workflow
 

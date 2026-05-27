@@ -23,6 +23,7 @@ class MasterManager:
         self.traffic_history: dict[str, list[dict]] = {}
         self.log_history: dict[str, list[dict]] = {}
         self.monitor_tasks: dict[str, asyncio.Task] = {}
+        self.poll_tasks: dict[str, asyncio.Task] = {}
 
     def create_master(self, name: str = "New Master", comm_mode: CommMode = CommMode.TCP,
                       master_address: int = 1, outstation_address: int = 2) -> DNP3Master:
@@ -50,6 +51,9 @@ class MasterManager:
         if master_id in self.monitor_tasks:
             self.monitor_tasks[master_id].cancel()
             del self.monitor_tasks[master_id]
+        if master_id in self.poll_tasks:
+            self.poll_tasks[master_id].cancel()
+            del self.poll_tasks[master_id]
 
         del self.masters[master_id]
         self.traffic_callbacks.pop(master_id, None)
@@ -69,6 +73,27 @@ class MasterManager:
         self.log_history.setdefault(master_id, []).append(entry)
         self.log_history[master_id] = self.log_history[master_id][-1000:]
 
+    async def _publish_traffic(self, master_id: str, direction: str, description: str, hex_text: str = ""):
+        frame_data = {
+            "timestamp": time.time(),
+            "direction": direction,
+            "description": description,
+            "hex": hex_text,
+        }
+        self._remember_traffic(master_id, frame_data)
+        for cb in self.traffic_callbacks.get(master_id, []):
+            await cb(frame_data)
+
+    async def _publish_log(self, master_id: str, level: str, message: str):
+        log_entry = {
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+            "level": level,
+            "message": message,
+        }
+        self._remember_log(master_id, log_entry)
+        for cb in self.log_callbacks.get(master_id, []):
+            await cb(self.log_history[master_id][-1])
+
     def get_traffic_history(self, master_id: str) -> list[dict]:
         return list(self.traffic_history.get(master_id, []))
 
@@ -87,6 +112,7 @@ class MasterManager:
         if not master:
             return None
 
+        polling_updated = False
         for key, value in updates.items():
             if value is not None and hasattr(master, key):
                 if key == "serial_config":
@@ -101,11 +127,15 @@ class MasterManager:
                 elif key == "polling_config":
                     for k, v in value.items():
                         setattr(master.polling_config, k, v)
+                    polling_updated = True
                 elif key == "timeout_config":
                     for k, v in value.items():
                         setattr(master.timeout_config, k, v)
                 else:
                     setattr(master, key, value)
+
+        if polling_updated and master_id in self.sessions:
+            self._start_auto_poll(master_id)
 
         return master
 
@@ -157,6 +187,7 @@ class MasterManager:
             self.sessions[master_id] = session
             master.state = ConnectionState.CONNECTED
             self._start_connection_monitor(master_id)
+            self._start_auto_poll(master_id)
         else:
             master.state = ConnectionState.ERROR
 
@@ -169,6 +200,8 @@ class MasterManager:
         self.monitor_tasks[master_id] = asyncio.create_task(self._connection_monitor(master_id))
 
     async def _connection_monitor(self, master_id: str):
+        failed_checks = 0
+        reconnect_grace_checks = 20
         try:
             while master_id in self.sessions:
                 await asyncio.sleep(1.0)
@@ -180,9 +213,60 @@ class MasterManager:
                 if not checker:
                     continue
                 connected = await checker()
-                if not connected:
+                if connected:
+                    if failed_checks:
+                        await self._publish_log(master_id, "info", "OpenDNP3 channel recovered.")
+                        await self._publish_traffic(master_id, "RX", "OpenDNP3 channel recovered", "NATIVE-OPENDNP3-CHANNEL-RECOVERED")
+                    failed_checks = 0
+                    master.state = ConnectionState.CONNECTED
+                    continue
+
+                failed_checks += 1
+                if failed_checks == 1:
+                    await self._publish_log(
+                        master_id,
+                        "warning",
+                        "OpenDNP3 channel closed; waiting for automatic reconnect before declaring error.",
+                    )
+                if failed_checks < reconnect_grace_checks:
+                    master.state = ConnectionState.CONNECTING
+                else:
                     master.state = ConnectionState.ERROR
+                    if failed_checks == reconnect_grace_checks:
+                        await self._publish_log(master_id, "error", "OpenDNP3 channel remained closed after reconnect grace period.")
+        except asyncio.CancelledError:
+            return
+
+    def _start_auto_poll(self, master_id: str):
+        existing = self.poll_tasks.get(master_id)
+        if existing:
+            existing.cancel()
+        self.poll_tasks[master_id] = asyncio.create_task(self._auto_poll(master_id))
+
+    async def _auto_poll(self, master_id: str):
+        try:
+            while master_id in self.sessions:
+                master = self.masters.get(master_id)
+                session = self.sessions.get(master_id)
+                if not master or not session:
                     return
+
+                interval = max(5, int(master.polling_config.integrity_poll_interval or 30))
+                await asyncio.sleep(interval)
+
+                master = self.masters.get(master_id)
+                session = self.sessions.get(master_id)
+                if not master or not session:
+                    return
+                if master.state != ConnectionState.CONNECTED:
+                    continue
+
+                try:
+                    await self._publish_log(master_id, "info", f"Automatic integrity poll every {interval}s.")
+                    await session.integrity_poll(master.master_address, master.outstation_address)
+                except Exception as exc:
+                    await self._publish_log(master_id, "warning", f"Automatic integrity poll failed: {exc}")
+                    await self._publish_traffic(master_id, "ERR", "Automatic integrity poll failed", "NATIVE-OPENDNP3-AUTO-POLL-ERROR")
         except asyncio.CancelledError:
             return
 
@@ -199,6 +283,9 @@ class MasterManager:
         if master_id in self.monitor_tasks:
             self.monitor_tasks[master_id].cancel()
             del self.monitor_tasks[master_id]
+        if master_id in self.poll_tasks:
+            self.poll_tasks[master_id].cancel()
+            del self.poll_tasks[master_id]
         return True
 
     async def execute_station_command(self, master_id: str, command: str) -> dict:
@@ -212,12 +299,18 @@ class MasterManager:
         oa = master.outstation_address
 
         if command == "integrity_poll":
-            data = await session.integrity_poll(ma, oa)
-            return {"success": True, "data_points": data}
+            try:
+                data = await session.integrity_poll(ma, oa)
+                return {"success": True, "data_points": data}
+            except Exception as exc:
+                return {"success": False, "error": str(exc)}
         elif command.startswith("class") and command.endswith("_poll"):
-            class_num = int(command.replace("class", "").replace("_poll", ""))
-            data = await session.class_poll(class_num, ma, oa)
-            return {"success": True, "data_points": data}
+            try:
+                class_num = int(command.replace("class", "").replace("_poll", ""))
+                data = await session.class_poll(class_num, ma, oa)
+                return {"success": True, "data_points": data}
+            except Exception as exc:
+                return {"success": False, "error": str(exc)}
         elif command == "time_sync":
             try:
                 await session.time_sync(ma, oa)

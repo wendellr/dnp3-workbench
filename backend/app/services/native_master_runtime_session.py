@@ -155,10 +155,14 @@ class NativeMasterRuntimeSession(BaseDNP3MasterSession):
             self.connected = False
             return False
 
+        was_connected = self.connected
         connected = bool(result.get("master", {}).get("connected", False))
-        if self.connected and not connected:
-            await self._emit_log("error", "OpenDNP3 channel closed; outstation appears offline.")
+        if was_connected and not connected:
+            await self._emit_log("warning", "OpenDNP3 channel closed; waiting for reconnect.")
             await self._emit_traffic("ERR", "OpenDNP3 channel CLOSED", "NATIVE-OPENDNP3-CHANNEL-CLOSED")
+        elif not was_connected and connected:
+            await self._emit_log("info", "OpenDNP3 channel is OPEN again.")
+            await self._emit_traffic("RX", "OpenDNP3 channel OPEN", "NATIVE-OPENDNP3-CHANNEL-OPEN")
         self.connected = connected
         return connected
 
