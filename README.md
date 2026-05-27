@@ -43,6 +43,7 @@ it is not the recommended production engine today. Keep production on
 | Integrity poll | Implemented for native TCP |
 | Class 1/2/3 poll buttons | Mapped to integrity poll in native runtime |
 | Data point table | Implemented |
+| Per-Master mini SCADA monitor | Implemented with browser localStorage selection |
 | Raw point type visibility | Implemented in Data Points and poll logs |
 | Master traffic tab | Implemented as runtime/application events, not raw DNP3 frame capture |
 | Global Traffic module | Implemented as operational overview |
@@ -237,7 +238,8 @@ Example response fields:
 3. Configure TCP host, port, Master address, and Outstation address.
 4. Click Connect.
 5. Run an Integrity Poll.
-6. Inspect Data Points, Traffic, and Log tabs.
+6. Inspect Data Points, SCADA, Traffic, and Log tabs.
+7. In SCADA, add only the points that should stay visible in the operator view.
 
 While connected, the backend runs automatic integrity polls using the configured
 Integrity Poll Interval. The minimum effective interval is 5 seconds.
@@ -247,6 +249,11 @@ outstation may return Binary Inputs, Analog Inputs, Counters, output status
 points, or other supported measurement families depending on its actual
 database. The Data Points tab shows the raw source type and the Log tab records
 a per-poll summary by type and index to help diagnose unexpected points.
+
+The SCADA tab is intentionally separate from Data Points. Data Points shows what
+the protocol returned; SCADA is the curated monitoring panel for selected
+points. The current selection is stored in the browser `localStorage` per
+Master.
 
 If the target outstation stops or the TCP channel closes, the backend first
 marks the Master as `connecting` and gives OpenDNP3 a reconnect grace window. If

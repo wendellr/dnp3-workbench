@@ -5,6 +5,7 @@ import StopIcon from '@mui/icons-material/Stop'
 import CommConfigTab from './tabs/CommConfigTab'
 import PollingConfigTab from './tabs/PollingConfigTab'
 import DataPointsTab from './tabs/DataPointsTab'
+import ScadaMonitorTab from './tabs/ScadaMonitorTab'
 import StationCommandsTab from './tabs/StationCommandsTab'
 import PointCommandsTab from './tabs/PointCommandsTab'
 import TrafficMonitorTab from './tabs/TrafficMonitorTab'
@@ -94,6 +95,7 @@ export default function ClientWorkspace({ client, onClientUpdated, onRefresh }) 
           <Tab label="Connection" />
           <Tab label="Polling" />
           <Tab label="Data Points" />
+          <Tab label="SCADA" />
           <Tab label="Station Commands" disabled={!isConnected} />
           <Tab label="Point Commands" disabled={!isConnected} />
           <Tab label="Traffic" />
@@ -104,10 +106,11 @@ export default function ClientWorkspace({ client, onClientUpdated, onRefresh }) 
           {tab === 0 && <CommConfigTab client={client} onUpdated={onClientUpdated} />}
           {tab === 1 && <PollingConfigTab client={client} onUpdated={onClientUpdated} />}
           {tab === 2 && <DataPointsTab client={client} />}
-          {tab === 3 && <StationCommandsTab client={client} />}
-          {tab === 4 && <PointCommandsTab client={client} />}
-          {tab === 5 && <TrafficMonitorTab client={client} />}
-          {tab === 6 && <LogViewerTab client={client} />}
+          {tab === 3 && <ScadaMonitorTab client={client} />}
+          {tab === 4 && <StationCommandsTab client={client} />}
+          {tab === 5 && <PointCommandsTab client={client} />}
+          {tab === 6 && <TrafficMonitorTab client={client} />}
+          {tab === 7 && <LogViewerTab client={client} />}
         </Box>
       </Box>
     </Box>
