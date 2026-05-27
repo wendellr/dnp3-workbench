@@ -106,6 +106,26 @@ class MasterManager:
     def get_all_masters(self) -> list[DNP3Master]:
         return list(self.masters.values())
 
+    async def clear_data_points(self, master_id: str) -> bool:
+        master = self.masters.get(master_id)
+        if not master:
+            return False
+
+        session = self.sessions.get(master_id)
+        if session:
+            clearer = getattr(session, "clear_points", None)
+            if clearer:
+                await clearer()
+                master.data_points = []
+                return True
+
+        master.data_points = []
+        await self._publish_log(master_id, "info", "Collected data points cleared.")
+        await self._publish_traffic(master_id, "ERR", "Collected data points cleared", "CLEAR-DATA-POINTS")
+        for cb in self.data_callbacks.get(master_id, []):
+            await cb([])
+        return True
+
     def update_master_config(self, master_id: str, updates: dict) -> Optional[DNP3Master]:
         """Update master configuration."""
         master = self.masters.get(master_id)

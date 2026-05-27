@@ -252,6 +252,14 @@ async def get_master_data_points(master_id: str):
     return [dp.__dict__ for dp in master.data_points]
 
 
+@router.delete("/masters/{master_id}/datapoints")
+async def clear_master_data_points(master_id: str):
+    ok = await master_manager.clear_data_points(master_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Master not found")
+    return {"ok": True, "detail": "Data points cleared.", "data_points": []}
+
+
 # --- DNP3 Reference ---
 
 @router.get("/dnp3/groups")

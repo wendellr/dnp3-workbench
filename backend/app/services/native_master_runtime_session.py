@@ -288,6 +288,12 @@ class NativeMasterRuntimeSession(BaseDNP3MasterSession):
         await self._emit_data(points)
         return points
 
+    async def clear_points(self):
+        await self._emit_log("info", "Collected data points cleared.")
+        await self._emit_traffic("ERR", "Collected data points cleared", "NATIVE-OPENDNP3-CLEAR-POINTS")
+        await self._emit_data([])
+        return []
+
     async def class_poll(self, class_num: int, master_addr: int, outstation_addr: int) -> list[dict]:
         await self._emit_log(
             "info",

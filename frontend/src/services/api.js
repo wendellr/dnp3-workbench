@@ -19,6 +19,7 @@ export const api = {
   masterStationCommand: (id, command) => http.post(`/masters/${id}/commands/station`, { command }).then(r => r.data),
   masterPointCommand: (id, data) => http.post(`/masters/${id}/commands/point`, data).then(r => r.data),
   getMasterDataPoints: (id) => http.get(`/masters/${id}/datapoints`).then(r => r.data),
+  clearMasterDataPoints: (id) => http.delete(`/masters/${id}/datapoints`).then(r => r.data),
 
   // Clients
   getClients: () => http.get('/clients').then(r => r.data),

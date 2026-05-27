@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react'
 import {
   Box, Typography, Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, Paper, Chip, IconButton, Tooltip, Select, MenuItem, FormControl, InputLabel
+  TableHead, TableRow, Paper, Chip, IconButton, Tooltip, Select, MenuItem, FormControl, InputLabel,
+  Snackbar, Alert
 } from '@mui/material'
+import DeleteSweepIcon from '@mui/icons-material/DeleteSweep'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { api } from '../../services/api'
 
@@ -21,6 +23,8 @@ const qualityColors = {
 export default function DataPointsTab({ client }) {
   const [dataPoints, setDataPoints] = useState(client.data_points || [])
   const [groupFilter, setGroupFilter] = useState('all')
+  const [toast, setToast] = useState(null)
+  const [clearing, setClearing] = useState(false)
 
   const fetchData = async () => {
     try {
@@ -32,6 +36,24 @@ export default function DataPointsTab({ client }) {
   }
 
   useEffect(() => { fetchData() }, [client.id])
+
+  const clearDataPoints = async () => {
+    if (!window.confirm('Clear all collected data points for this master?')) return
+    setClearing(true)
+    try {
+      await api.clearMasterDataPoints(client.id)
+      setDataPoints([])
+      setToast({ severity: 'success', message: 'Collected data points cleared.' })
+    } catch (err) {
+      console.error('Failed to clear data points:', err)
+      setToast({
+        severity: 'error',
+        message: err.response?.data?.detail || err.message || 'Failed to clear data points.',
+      })
+    } finally {
+      setClearing(false)
+    }
+  }
 
   const filtered = groupFilter === 'all'
     ? dataPoints
@@ -56,6 +78,13 @@ export default function DataPointsTab({ client }) {
         <Chip label={`${filtered.length} points`} size="small" />
         <Tooltip title="Refresh">
           <IconButton size="small" onClick={fetchData}><RefreshIcon fontSize="small" /></IconButton>
+        </Tooltip>
+        <Tooltip title="Clear collected data points">
+          <span>
+            <IconButton size="small" color="error" disabled={clearing || dataPoints.length === 0} onClick={clearDataPoints}>
+              <DeleteSweepIcon fontSize="small" />
+            </IconButton>
+          </span>
         </Tooltip>
       </Box>
 
@@ -102,6 +131,16 @@ export default function DataPointsTab({ client }) {
           </TableBody>
         </Table>
       </TableContainer>
+      <Snackbar
+        open={Boolean(toast)}
+        autoHideDuration={5000}
+        onClose={() => setToast(null)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+      >
+        <Alert severity={toast?.severity || 'info'} onClose={() => setToast(null)} sx={{ maxWidth: 520 }}>
+          {toast?.message}
+        </Alert>
+      </Snackbar>
     </Box>
   )
 }
