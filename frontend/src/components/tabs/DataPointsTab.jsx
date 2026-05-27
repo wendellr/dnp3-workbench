@@ -64,18 +64,21 @@ export default function DataPointsTab({ client }) {
           <TableHead>
             <TableRow>
               <TableCell sx={{ fontWeight: 600, fontSize: 11 }}>Index</TableCell>
+              <TableCell sx={{ fontWeight: 600, fontSize: 11 }}>Source Type</TableCell>
               <TableCell sx={{ fontWeight: 600, fontSize: 11 }}>Group</TableCell>
               <TableCell sx={{ fontWeight: 600, fontSize: 11 }}>Variation</TableCell>
               <TableCell sx={{ fontWeight: 600, fontSize: 11 }}>Description</TableCell>
               <TableCell sx={{ fontWeight: 600, fontSize: 11 }}>Value</TableCell>
               <TableCell sx={{ fontWeight: 600, fontSize: 11 }}>Quality</TableCell>
               <TableCell sx={{ fontWeight: 600, fontSize: 11 }}>Timestamp</TableCell>
+              <TableCell sx={{ fontWeight: 600, fontSize: 11 }}>DNP Time</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {filtered.map((dp, i) => (
               <TableRow key={i} hover>
                 <TableCell sx={{ fontSize: 12 }}>{dp.index}</TableCell>
+                <TableCell sx={{ fontSize: 12 }}>{dp.source_type || '-'}</TableCell>
                 <TableCell sx={{ fontSize: 12 }}>{dp.group} - {groupNames[dp.group] || ''}</TableCell>
                 <TableCell sx={{ fontSize: 12 }}>{dp.variation}</TableCell>
                 <TableCell sx={{ fontSize: 12 }}>{dp.description}</TableCell>
@@ -86,11 +89,12 @@ export default function DataPointsTab({ client }) {
                     sx={{ fontSize: 10, height: 20 }} />
                 </TableCell>
                 <TableCell sx={{ fontSize: 11, color: '#666' }}>{dp.timestamp}</TableCell>
+                <TableCell sx={{ fontSize: 11, color: '#666' }}>{dp.dnp_time || '-'}</TableCell>
               </TableRow>
             ))}
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} sx={{ textAlign: 'center', py: 3, color: '#999' }}>
+                <TableCell colSpan={9} sx={{ textAlign: 'center', py: 3, color: '#999' }}>
                   No data points. Execute an Integrity Poll to fetch data.
                 </TableCell>
               </TableRow>

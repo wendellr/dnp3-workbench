@@ -65,6 +65,8 @@ class DataPoint:
     quality: str = "ONLINE"
     timestamp: str = ""
     description: str = ""
+    source_type: str = ""
+    dnp_time: str = ""
 
 
 DNP3_GROUPS = {

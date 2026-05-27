@@ -63,6 +63,8 @@ class DataPointSchema(BaseModel):
     quality: str = "ONLINE"
     timestamp: str = ""
     description: str = ""
+    source_type: str = ""
+    dnp_time: str = ""
 
 
 class StationCommandRequest(BaseModel):

@@ -4,6 +4,7 @@ DNP3 master session backed by the native OpenDNP3 runtime service.
 
 import asyncio
 import time
+from collections import defaultdict
 from typing import Callable, Optional
 
 from app.services.dnp3_base import BaseDNP3MasterSession
@@ -80,8 +81,32 @@ class NativeMasterRuntimeSession(BaseDNP3MasterSession):
                 "quality": str(point.get("quality", "")),
                 "timestamp": point.get("timestamp", ""),
                 "description": point_type.replace("_", " ").title(),
+                "source_type": point_type,
+                "dnp_time": str(point.get("dnp_time", "")),
             }
         return list(latest_by_point.values())
+
+    def _summarize_raw_points(self, points: list[dict]) -> str:
+        if not points:
+            return "no raw points"
+
+        by_type: dict[str, list[int]] = defaultdict(list)
+        for point in points:
+            point_type = point.get("type", "unknown")
+            try:
+                index = int(point.get("index", 0))
+            except (TypeError, ValueError):
+                index = 0
+            by_type[point_type].append(index)
+
+        parts = []
+        for point_type in sorted(by_type):
+            indexes = sorted(set(by_type[point_type]))
+            preview = ", ".join(str(index) for index in indexes[:12])
+            suffix = "" if len(indexes) <= 12 else f", +{len(indexes) - 12} more"
+            group, variation = POINT_TYPE_TO_GROUP.get(point_type, (0, 0))
+            parts.append(f"{point_type} G{group}V{variation}: {len(indexes)} index(es) [{preview}{suffix}]")
+        return "; ".join(parts)
 
     async def connect(self, comm_mode: str, config: dict, master_addr: int, outstation_addr: int) -> bool:
         if comm_mode != "tcp":
@@ -177,12 +202,14 @@ class NativeMasterRuntimeSession(BaseDNP3MasterSession):
             raw_points = (await self._get(f"/masters/{self.client_id}/points", timeout=5.0)).get("points", [])
 
         points = self._normalize_points(raw_points)
+        summary = self._summarize_raw_points(raw_points)
         await self._emit_traffic(
             "RX",
-            f"Integrity poll response with {len(points)} data points",
+            f"Integrity poll response with {len(points)} normalized data points",
             "NATIVE-OPENDNP3-SOE-RESPONSE",
         )
-        await self._emit_log("info", f"Integrity poll completed with {len(points)} data points.")
+        await self._emit_log("info", f"Integrity poll raw summary: {summary}")
+        await self._emit_log("info", f"Integrity poll completed with {len(points)} normalized data points.")
         await self._emit_data(points)
         return points
 
