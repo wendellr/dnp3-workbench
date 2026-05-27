@@ -1,11 +1,13 @@
 #include "opendnp3_master_bridge.h"
 
+#include <algorithm>
 #include <chrono>
+#include <cctype>
+#include <cstddef>
 #include <ctime>
 #include <thread>
 
 #if defined(OPENDNP3_ENABLED) && OPENDNP3_ENABLED == 1
-#include <opendnp3/ConsoleLogger.h>
 #include <opendnp3/app/ClassField.h>
 #include <opendnp3/app/GroupVariationID.h>
 #include <opendnp3/app/MeasurementTypes.h>
@@ -36,7 +38,61 @@ json event_json(const std::string& type, const std::string& status, const std::s
     };
 }
 
+void append_event(std::vector<json>& events, const json& event) {
+    constexpr std::size_t max_events = 2000;
+    constexpr std::size_t keep_events = 1000;
+
+    events.push_back(event);
+    if (events.size() > max_events) {
+        events.erase(events.begin(), events.begin() + static_cast<std::ptrdiff_t>(events.size() - keep_events));
+    }
+}
+
 #if defined(OPENDNP3_ENABLED) && OPENDNP3_ENABLED == 1
+
+std::string compact_log_message(const char* id, const char* location, const char* message) {
+    std::string detail;
+    if (id && id[0] != '\0') {
+        detail += "[";
+        detail += id;
+        detail += "] ";
+    }
+    if (message && message[0] != '\0') {
+        detail += message;
+    }
+    if (location && location[0] != '\0') {
+        detail += " @ ";
+        detail += location;
+    }
+    return detail;
+}
+
+class RuntimeLogHandler final : public opendnp3::ILogHandler {
+public:
+    RuntimeLogHandler(OpenDnp3MasterBridge::Cache& cache, std::mutex& mutex)
+        : cache_(cache), mutex_(mutex) {}
+
+    void log(
+        opendnp3::ModuleId,
+        const char* id,
+        opendnp3::LogLevel level,
+        char const* location,
+        char const* message
+    ) override {
+        const char* level_text = opendnp3::LogFlagToString(level);
+        std::string status = level_text && level_text[0] != '\0' ? level_text : "LOG";
+        std::transform(status.begin(), status.end(), status.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+
+        std::lock_guard<std::mutex> lock(mutex_);
+        append_event(cache_.events, event_json("opendnp3_log", status, compact_log_message(id, location, message)));
+    }
+
+private:
+    OpenDnp3MasterBridge::Cache& cache_;
+    std::mutex& mutex_;
+};
 
 std::string flags_to_hex(const opendnp3::Flags& flags) {
     constexpr char hex[] = "0123456789ABCDEF";
@@ -74,7 +130,7 @@ public:
     void EndFragment(const opendnp3::ResponseInfo&) override {
         std::lock_guard<std::mutex> lock(mutex_);
         cache_.response_received = true;
-        cache_.events.push_back(event_json("soe_fragment", "received", "SOE fragment processed"));
+        append_event(cache_.events, event_json("soe_fragment", "received", "SOE fragment processed"));
     }
 
     void Process(const opendnp3::HeaderInfo&, const opendnp3::ICollection<opendnp3::Indexed<opendnp3::Binary>>& values) override {
@@ -160,7 +216,7 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         cache_.channel_state = opendnp3::ChannelStateSpec::to_string(state);
         cache_.channel_open = state == opendnp3::ChannelState::OPEN;
-        cache_.events.push_back(event_json("channel", cache_.channel_state, "OpenDNP3 channel state changed"));
+        append_event(cache_.events, event_json("channel", cache_.channel_state, "OpenDNP3 channel state changed"));
     }
 
 private:
@@ -208,7 +264,7 @@ OpenDnp3MasterResult OpenDnp3MasterBridge::connect(const OpenDnp3MasterConfig& c
             cache.channel_state = "CLOSED";
             cache.channel_open = false;
             cache.response_received = false;
-            cache.events.push_back(event_json("connect", "starting", "Creating OpenDNP3 TCP client master"));
+            append_event(cache.events, event_json("connect", "starting", "Creating OpenDNP3 TCP client master"));
         }
 
         if (has_old_session) {
@@ -223,9 +279,10 @@ OpenDnp3MasterResult OpenDnp3MasterBridge::connect(const OpenDnp3MasterConfig& c
             }
         }
 
-        const auto log_levels = opendnp3::levels::NORMAL;
+        const auto log_levels = opendnp3::levels::NORMAL | opendnp3::levels::ALL_COMMS;
         Session session;
-        session.manager = std::make_shared<opendnp3::DNP3Manager>(1, opendnp3::ConsoleLogger::Create());
+        session.log_handler = std::make_shared<RuntimeLogHandler>(*cache_ptr, mutex_);
+        session.manager = std::make_shared<opendnp3::DNP3Manager>(1, session.log_handler);
         session.channel_listener = std::make_shared<RuntimeChannelListener>(*cache_ptr, mutex_);
         session.channel = session.manager->AddTCPClient(
             "dnp3-master-" + config.id,
@@ -254,7 +311,7 @@ OpenDnp3MasterResult OpenDnp3MasterBridge::connect(const OpenDnp3MasterConfig& c
         {
             std::lock_guard<std::mutex> lock(mutex_);
             auto& cache = caches_[config.id];
-            cache.events.push_back(event_json("connect", "enabled", "OpenDNP3 master enabled; waiting for TCP channel OPEN"));
+            append_event(cache.events, event_json("connect", "enabled", "OpenDNP3 master enabled; waiting for TCP channel OPEN"));
             sessions_[config.id] = session;
         }
 
@@ -263,7 +320,7 @@ OpenDnp3MasterResult OpenDnp3MasterBridge::connect(const OpenDnp3MasterConfig& c
                 std::lock_guard<std::mutex> lock(mutex_);
                 auto& cache = caches_[config.id];
                 if (cache.channel_open) {
-                    cache.events.push_back(event_json("connect", "open", "OpenDNP3 TCP channel is OPEN"));
+                    append_event(cache.events, event_json("connect", "open", "OpenDNP3 TCP channel is OPEN"));
                     return {true, true, "channel_open", cache.points, cache.events};
                 }
             }
@@ -275,7 +332,7 @@ OpenDnp3MasterResult OpenDnp3MasterBridge::connect(const OpenDnp3MasterConfig& c
         {
             std::lock_guard<std::mutex> lock(mutex_);
             auto& cache = caches_[config.id];
-            cache.events.push_back(event_json("connect", "timeout", "OpenDNP3 TCP channel did not open"));
+            append_event(cache.events, event_json("connect", "timeout", "OpenDNP3 TCP channel did not open"));
             auto it = sessions_.find(config.id);
             if (it != sessions_.end()) {
                 timeout_session = it->second;
@@ -300,7 +357,7 @@ OpenDnp3MasterResult OpenDnp3MasterBridge::connect(const OpenDnp3MasterConfig& c
     } catch (const std::exception& exc) {
         std::lock_guard<std::mutex> lock(mutex_);
         auto& cache = caches_[config.id];
-        cache.events.push_back(event_json("connect", "error", exc.what()));
+        append_event(cache.events, event_json("connect", "error", exc.what()));
         return {false, false, exc.what(), cache.points, cache.events};
     }
 #else
@@ -331,7 +388,7 @@ OpenDnp3MasterResult OpenDnp3MasterBridge::disconnect(const std::string& id) {
     }
     std::lock_guard<std::mutex> lock(mutex_);
     auto& cache = caches_[id];
-    cache.events.push_back(event_json("disconnect", "ok", "OpenDNP3 master stopped"));
+    append_event(cache.events, event_json("disconnect", "ok", "OpenDNP3 master stopped"));
     cache.channel_state = "CLOSED";
         cache.channel_open = false;
         return {true, false, "ok", cache.points, cache.events};
@@ -357,13 +414,13 @@ OpenDnp3MasterResult OpenDnp3MasterBridge::integrity_poll(const std::string& id)
         }
         auto& cache = caches_[id];
         if (!cache.channel_open) {
-            cache.events.push_back(event_json("integrity_poll", "blocked", "TCP channel is not OPEN"));
+            append_event(cache.events, event_json("integrity_poll", "blocked", "TCP channel is not OPEN"));
             return {false, false, "channel_not_open", cache.points, cache.events};
         }
 
         cache.points.clear();
         cache.response_received = false;
-        cache.events.push_back(event_json("integrity_poll", "queued", "Class 0/1/2/3 scan queued"));
+        append_event(cache.events, event_json("integrity_poll", "queued", "Class 0/1/2/3 scan queued"));
         master = it->second.master;
         soe_handler = it->second.soe_handler;
     }

@@ -63,6 +63,15 @@ class NativeMasterRuntimeSession(BaseDNP3MasterSession):
             await self.on_data_update(self.client_id, points)
 
     async def _emit_runtime_events(self, events: list[dict]):
+        level_aliases = {
+            "debug": "debug",
+            "dbg": "debug",
+            "info": "info",
+            "warn": "warning",
+            "warning": "warning",
+            "err": "error",
+            "error": "error",
+        }
         for event in events:
             event_type = event.get("type", "runtime")
             status = event.get("status", "info")
@@ -74,8 +83,17 @@ class NativeMasterRuntimeSession(BaseDNP3MasterSession):
             self._emitted_runtime_events.add(event_key)
             if len(self._emitted_runtime_events) > 2000:
                 self._emitted_runtime_events = set(list(self._emitted_runtime_events)[-1000:])
-            level = status if status in {"debug", "info", "warning", "error"} else "info"
+            level = level_aliases.get(str(status).lower(), "info")
             await self._emit_log(level, f"{event_type} [{status}]: {detail}".strip())
+            if event_type == "opendnp3_log":
+                status_text = str(status).lower()
+                if level == "error":
+                    direction = "ERR"
+                elif "tx" in status_text:
+                    direction = "TX"
+                else:
+                    direction = "RX"
+                await self._emit_traffic(direction, f"OpenDNP3 low-level log [{status}]: {detail}", "NATIVE-OPENDNP3-LOWLEVEL")
 
     def _normalize_points(self, points: list[dict]) -> list[dict]:
         latest_by_point = {}
@@ -190,6 +208,7 @@ class NativeMasterRuntimeSession(BaseDNP3MasterSession):
             return False
 
         was_connected = self.connected
+        await self._emit_runtime_events(result.get("master", {}).get("events", []))
         connected = bool(result.get("master", {}).get("connected", False))
         if was_connected and not connected:
             await self._emit_log("warning", "OpenDNP3 channel closed; waiting for reconnect.")

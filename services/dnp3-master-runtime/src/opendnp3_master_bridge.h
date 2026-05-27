@@ -12,6 +12,7 @@
 #include <opendnp3/DNP3Manager.h>
 #include <opendnp3/channel/IChannel.h>
 #include <opendnp3/channel/IChannelListener.h>
+#include <opendnp3/logging/ILogHandler.h>
 #include <opendnp3/master/IMaster.h>
 #include <opendnp3/master/ISOEHandler.h>
 #endif
@@ -68,6 +69,7 @@ private:
         std::shared_ptr<opendnp3::IMaster> master;
         std::shared_ptr<opendnp3::ISOEHandler> soe_handler;
         std::shared_ptr<opendnp3::IChannelListener> channel_listener;
+        std::shared_ptr<opendnp3::ILogHandler> log_handler;
     };
 
     std::map<std::string, Session> sessions_;
