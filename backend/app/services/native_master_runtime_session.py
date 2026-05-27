@@ -88,7 +88,6 @@ class NativeMasterRuntimeSession(BaseDNP3MasterSession):
             if len(self._emitted_runtime_events) > 2000:
                 self._emitted_runtime_events = set(list(self._emitted_runtime_events)[-1000:])
             level = level_aliases.get(str(status).lower(), "info")
-            await self._emit_log(level, f"{event_type} [{status}]: {detail}".strip())
             if event_type == "opendnp3_log":
                 await self._emit_opendnp3_diagnostic(str(detail))
                 status_text = str(status).lower()
@@ -99,6 +98,8 @@ class NativeMasterRuntimeSession(BaseDNP3MasterSession):
                 else:
                     direction = "RX"
                 await self._emit_traffic(direction, f"OpenDNP3 low-level log [{status}]: {detail}", "NATIVE-OPENDNP3-LOWLEVEL")
+                continue
+            await self._emit_log(level, f"{event_type} [{status}]: {detail}".strip())
 
     async def _emit_opendnp3_diagnostic(self, detail: str):
         unknown_route = re.search(r"unknown route,\s*source:\s*(\d+),\s*dest\s*(\d+)", detail, re.IGNORECASE)
