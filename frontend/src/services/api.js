@@ -2,8 +2,24 @@ import axios from 'axios'
 
 const BASE_URL = import.meta.env.VITE_API_URL || '/api'
 const LOCAL_MASTERS_KEY = 'dnp3.workbench.localMasters.v1'
+const LOCAL_SESSION_KEY = 'dnp3.workbench.browserSession.v1'
 
 const http = axios.create({ baseURL: BASE_URL })
+
+const browserSessionId = () => {
+  let sessionId = localStorage.getItem(LOCAL_SESSION_KEY)
+  if (!sessionId) {
+    sessionId = crypto.randomUUID()
+    localStorage.setItem(LOCAL_SESSION_KEY, sessionId)
+  }
+  return sessionId
+}
+
+http.interceptors.request.use(config => {
+  config.headers = config.headers || {}
+  config.headers['X-Workbench-Session'] = browserSessionId()
+  return config
+})
 
 const defaultMaster = (data = {}) => ({
   id: data.id || crypto.randomUUID(),
@@ -178,10 +194,12 @@ export const api = {
 
 export function createWebSocket(clientId, type) {
   const wsBase = window.location.origin.replace(/^http/, 'ws')
-  return new WebSocket(`${wsBase}/api/clients/${clientId}/${type}`)
+  const session = encodeURIComponent(browserSessionId())
+  return new WebSocket(`${wsBase}/api/clients/${clientId}/${type}?session=${session}`)
 }
 
 export function createMasterWebSocket(masterId, type) {
   const wsBase = window.location.origin.replace(/^http/, 'ws')
-  return new WebSocket(`${wsBase}/api/masters/${masterId}/${type}`)
+  const session = encodeURIComponent(browserSessionId())
+  return new WebSocket(`${wsBase}/api/masters/${masterId}/${type}?session=${session}`)
 }

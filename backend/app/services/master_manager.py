@@ -27,16 +27,22 @@ class MasterManager:
 
     def create_master(self, name: str = "New Master", comm_mode: CommMode = CommMode.TCP,
                       master_address: int = 1, outstation_address: int = 2,
-                      master_id: str | None = None) -> DNP3Master:
+                      master_id: str | None = None, owner_session: str = "") -> DNP3Master:
         """Create a new DNP3 master."""
         if len(self.masters) >= 50:
             raise ValueError("Maximum 50 masters allowed")
+        if master_id and master_id in self.masters:
+            existing = self.masters[master_id]
+            if existing.owner_session != owner_session:
+                raise ValueError("Master id already belongs to another browser session")
+            return existing
 
         master_kwargs = {
             "name": name,
             "comm_mode": comm_mode,
             "master_address": master_address,
             "outstation_address": outstation_address,
+            "owner_session": owner_session,
         }
         if master_id:
             master_kwargs["id"] = master_id
@@ -106,6 +112,10 @@ class MasterManager:
 
     def get_master(self, master_id: str) -> Optional[DNP3Master]:
         return self.masters.get(master_id)
+
+    def owns_master(self, master_id: str, owner_session: str) -> bool:
+        master = self.masters.get(master_id)
+        return bool(master and master.owner_session and master.owner_session == owner_session)
 
     def get_all_masters(self) -> list[DNP3Master]:
         return list(self.masters.values())

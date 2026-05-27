@@ -1,4 +1,4 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Header, Query
 from app.schemas.master import (
     CreateMasterRequest, UpdateMasterConfigRequest, MasterResponse,
     StationCommandRequest, PointCommandRequest, DataPointSchema
@@ -53,6 +53,26 @@ def nested_create_updates(req: CreateMasterRequest) -> dict:
     return updates
 
 
+def require_owner_header(owner_session: str | None) -> str:
+    if not owner_session:
+        raise HTTPException(status_code=403, detail="Missing browser session.")
+    return owner_session
+
+
+def require_master_owner(master_id: str, owner_session: str | None) -> str:
+    owner = require_owner_header(owner_session)
+    if not master_manager.owns_master(master_id, owner):
+        raise HTTPException(status_code=404, detail="Master not found")
+    return owner
+
+
+async def close_if_not_owner(websocket: WebSocket, master_id: str, owner_session: str | None) -> bool:
+    if not owner_session or not master_manager.owns_master(master_id, owner_session):
+        await websocket.close(code=1008)
+        return True
+    return False
+
+
 # --- Server Capabilities ---
 
 @router.get("/capabilities")
@@ -85,12 +105,13 @@ async def list_masters():
 
 
 @router.post("/clients")
-async def create_client(req: CreateMasterRequest):
+async def create_client(req: CreateMasterRequest, x_workbench_session: str | None = Header(default=None)):
+    owner = require_owner_header(x_workbench_session)
     try:
         master = master_manager.create_master(
             name=req.name, comm_mode=req.comm_mode,
             master_address=req.master_address, outstation_address=req.outstation_address,
-            master_id=req.id,
+            master_id=req.id, owner_session=owner,
         )
         updates = nested_create_updates(req)
         if updates:
@@ -101,12 +122,13 @@ async def create_client(req: CreateMasterRequest):
 
 
 @router.post("/masters")
-async def create_master(req: CreateMasterRequest):
+async def create_master(req: CreateMasterRequest, x_workbench_session: str | None = Header(default=None)):
+    owner = require_owner_header(x_workbench_session)
     try:
         master = master_manager.create_master(
             name=req.name, comm_mode=req.comm_mode,
             master_address=req.master_address, outstation_address=req.outstation_address,
-            master_id=req.id,
+            master_id=req.id, owner_session=owner,
         )
         updates = nested_create_updates(req)
         if updates:
@@ -117,7 +139,8 @@ async def create_master(req: CreateMasterRequest):
 
 
 @router.get("/clients/{client_id}")
-async def get_client(client_id: str):
+async def get_client(client_id: str, x_workbench_session: str | None = Header(default=None)):
+    require_master_owner(client_id, x_workbench_session)
     master = master_manager.get_master(client_id)
     if not master:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -125,7 +148,8 @@ async def get_client(client_id: str):
 
 
 @router.get("/masters/{master_id}")
-async def get_master(master_id: str):
+async def get_master(master_id: str, x_workbench_session: str | None = Header(default=None)):
+    require_master_owner(master_id, x_workbench_session)
     master = master_manager.get_master(master_id)
     if not master:
         raise HTTPException(status_code=404, detail="Master not found")
@@ -133,7 +157,8 @@ async def get_master(master_id: str):
 
 
 @router.put("/clients/{client_id}/config")
-async def update_client_config(client_id: str, req: UpdateMasterConfigRequest):
+async def update_client_config(client_id: str, req: UpdateMasterConfigRequest, x_workbench_session: str | None = Header(default=None)):
+    require_master_owner(client_id, x_workbench_session)
     updates = req.model_dump(exclude_none=True)
     # Convert nested schemas to dicts
     for key in ["serial_config", "tcp_config", "udp_config", "polling_config", "timeout_config"]:
@@ -147,7 +172,8 @@ async def update_client_config(client_id: str, req: UpdateMasterConfigRequest):
 
 
 @router.put("/masters/{master_id}/config")
-async def update_master_config(master_id: str, req: UpdateMasterConfigRequest):
+async def update_master_config(master_id: str, req: UpdateMasterConfigRequest, x_workbench_session: str | None = Header(default=None)):
+    require_master_owner(master_id, x_workbench_session)
     updates = req.model_dump(exclude_none=True)
     for key in ["serial_config", "tcp_config", "udp_config", "polling_config", "timeout_config"]:
         if key in updates and updates[key] is not None:
@@ -160,14 +186,16 @@ async def update_master_config(master_id: str, req: UpdateMasterConfigRequest):
 
 
 @router.delete("/clients/{client_id}")
-async def delete_client(client_id: str):
+async def delete_client(client_id: str, x_workbench_session: str | None = Header(default=None)):
+    require_master_owner(client_id, x_workbench_session)
     if not master_manager.delete_master(client_id):
         raise HTTPException(status_code=404, detail="Client not found")
     return {"status": "deleted"}
 
 
 @router.delete("/masters/{master_id}")
-async def delete_master(master_id: str):
+async def delete_master(master_id: str, x_workbench_session: str | None = Header(default=None)):
+    require_master_owner(master_id, x_workbench_session)
     if not master_manager.delete_master(master_id):
         raise HTTPException(status_code=404, detail="Master not found")
     return {"status": "deleted"}
@@ -176,7 +204,8 @@ async def delete_master(master_id: str):
 # --- Connection ---
 
 @router.post("/clients/{client_id}/connect")
-async def connect_client(client_id: str):
+async def connect_client(client_id: str, x_workbench_session: str | None = Header(default=None)):
+    require_master_owner(client_id, x_workbench_session)
     success = await master_manager.connect_master(client_id)
     if not success:
         raise HTTPException(status_code=400, detail="Connection failed")
@@ -184,7 +213,8 @@ async def connect_client(client_id: str):
 
 
 @router.post("/masters/{master_id}/connect")
-async def connect_master(master_id: str):
+async def connect_master(master_id: str, x_workbench_session: str | None = Header(default=None)):
+    require_master_owner(master_id, x_workbench_session)
     success = await master_manager.connect_master(master_id)
     if not success:
         raise HTTPException(status_code=400, detail="Connection failed")
@@ -192,7 +222,8 @@ async def connect_master(master_id: str):
 
 
 @router.post("/clients/{client_id}/disconnect")
-async def disconnect_client(client_id: str):
+async def disconnect_client(client_id: str, x_workbench_session: str | None = Header(default=None)):
+    require_master_owner(client_id, x_workbench_session)
     success = await master_manager.disconnect_master(client_id)
     if not success:
         raise HTTPException(status_code=400, detail="Disconnect failed")
@@ -200,7 +231,8 @@ async def disconnect_client(client_id: str):
 
 
 @router.post("/masters/{master_id}/disconnect")
-async def disconnect_master(master_id: str):
+async def disconnect_master(master_id: str, x_workbench_session: str | None = Header(default=None)):
+    require_master_owner(master_id, x_workbench_session)
     success = await master_manager.disconnect_master(master_id)
     if not success:
         raise HTTPException(status_code=400, detail="Disconnect failed")
@@ -210,7 +242,8 @@ async def disconnect_master(master_id: str):
 # --- Commands ---
 
 @router.post("/clients/{client_id}/commands/station")
-async def station_command(client_id: str, req: StationCommandRequest):
+async def station_command(client_id: str, req: StationCommandRequest, x_workbench_session: str | None = Header(default=None)):
+    require_master_owner(client_id, x_workbench_session)
     result = await master_manager.execute_station_command(client_id, req.command)
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("error", "Command failed"))
@@ -218,7 +251,8 @@ async def station_command(client_id: str, req: StationCommandRequest):
 
 
 @router.post("/masters/{master_id}/commands/station")
-async def master_station_command(master_id: str, req: StationCommandRequest):
+async def master_station_command(master_id: str, req: StationCommandRequest, x_workbench_session: str | None = Header(default=None)):
+    require_master_owner(master_id, x_workbench_session)
     result = await master_manager.execute_station_command(master_id, req.command)
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("error", "Command failed"))
@@ -226,7 +260,8 @@ async def master_station_command(master_id: str, req: StationCommandRequest):
 
 
 @router.post("/clients/{client_id}/commands/point")
-async def point_command(client_id: str, req: PointCommandRequest):
+async def point_command(client_id: str, req: PointCommandRequest, x_workbench_session: str | None = Header(default=None)):
+    require_master_owner(client_id, x_workbench_session)
     result = await master_manager.execute_point_command(
         client_id, req.command_type, req.group, req.variation,
         req.index, req.value, count=req.count,
@@ -238,7 +273,8 @@ async def point_command(client_id: str, req: PointCommandRequest):
 
 
 @router.post("/masters/{master_id}/commands/point")
-async def master_point_command(master_id: str, req: PointCommandRequest):
+async def master_point_command(master_id: str, req: PointCommandRequest, x_workbench_session: str | None = Header(default=None)):
+    require_master_owner(master_id, x_workbench_session)
     result = await master_manager.execute_point_command(
         master_id, req.command_type, req.group, req.variation,
         req.index, req.value, count=req.count,
@@ -252,7 +288,8 @@ async def master_point_command(master_id: str, req: PointCommandRequest):
 # --- Data Points ---
 
 @router.get("/clients/{client_id}/datapoints")
-async def get_data_points(client_id: str):
+async def get_data_points(client_id: str, x_workbench_session: str | None = Header(default=None)):
+    require_master_owner(client_id, x_workbench_session)
     master = master_manager.get_master(client_id)
     if not master:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -260,7 +297,8 @@ async def get_data_points(client_id: str):
 
 
 @router.get("/masters/{master_id}/datapoints")
-async def get_master_data_points(master_id: str):
+async def get_master_data_points(master_id: str, x_workbench_session: str | None = Header(default=None)):
+    require_master_owner(master_id, x_workbench_session)
     master = master_manager.get_master(master_id)
     if not master:
         raise HTTPException(status_code=404, detail="Master not found")
@@ -268,7 +306,8 @@ async def get_master_data_points(master_id: str):
 
 
 @router.delete("/masters/{master_id}/datapoints")
-async def clear_master_data_points(master_id: str):
+async def clear_master_data_points(master_id: str, x_workbench_session: str | None = Header(default=None)):
+    require_master_owner(master_id, x_workbench_session)
     ok = await master_manager.clear_data_points(master_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Master not found")
@@ -375,7 +414,9 @@ async def delete_demo_outstation_point(point_id: str):
 # --- WebSocket: Traffic Monitor ---
 
 @router.websocket("/clients/{client_id}/traffic")
-async def traffic_ws(websocket: WebSocket, client_id: str):
+async def traffic_ws(websocket: WebSocket, client_id: str, session: str | None = Query(default=None)):
+    if await close_if_not_owner(websocket, client_id, session):
+        return
     await websocket.accept()
 
     async def send_traffic(frame_data):
@@ -399,13 +440,15 @@ async def traffic_ws(websocket: WebSocket, client_id: str):
 
 @router.websocket("/masters/{master_id}/traffic")
 async def master_traffic_ws(websocket: WebSocket, master_id: str):
-    await traffic_ws(websocket, master_id)
+    await traffic_ws(websocket, master_id, websocket.query_params.get("session"))
 
 
 # --- WebSocket: Log Monitor ---
 
 @router.websocket("/clients/{client_id}/logs")
-async def logs_ws(websocket: WebSocket, client_id: str):
+async def logs_ws(websocket: WebSocket, client_id: str, session: str | None = Query(default=None)):
+    if await close_if_not_owner(websocket, client_id, session):
+        return
     await websocket.accept()
 
     async def send_log(log_entry):
@@ -429,13 +472,15 @@ async def logs_ws(websocket: WebSocket, client_id: str):
 
 @router.websocket("/masters/{master_id}/logs")
 async def master_logs_ws(websocket: WebSocket, master_id: str):
-    await logs_ws(websocket, master_id)
+    await logs_ws(websocket, master_id, websocket.query_params.get("session"))
 
 
 # --- WebSocket: Data Updates ---
 
 @router.websocket("/clients/{client_id}/data")
-async def data_ws(websocket: WebSocket, client_id: str):
+async def data_ws(websocket: WebSocket, client_id: str, session: str | None = Query(default=None)):
+    if await close_if_not_owner(websocket, client_id, session):
+        return
     await websocket.accept()
 
     async def send_data(data_points):
@@ -457,4 +502,4 @@ async def data_ws(websocket: WebSocket, client_id: str):
 
 @router.websocket("/masters/{master_id}/data")
 async def master_data_ws(websocket: WebSocket, master_id: str):
-    await data_ws(websocket, master_id)
+    await data_ws(websocket, master_id, websocket.query_params.get("session"))

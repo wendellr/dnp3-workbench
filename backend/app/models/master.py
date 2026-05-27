@@ -97,6 +97,7 @@ DNP3_GROUPS = {
 @dataclass
 class DNP3Master:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    owner_session: str = ""
     name: str = "Master 1"
     comm_mode: CommMode = CommMode.TCP
     master_address: int = 1
