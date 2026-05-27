@@ -226,7 +226,7 @@ class MasterManager:
                     await self._publish_log(
                         master_id,
                         "warning",
-                        "OpenDNP3 channel closed; waiting for automatic reconnect before declaring error.",
+                        "Reconnect grace timer started; Master state is reconnecting.",
                     )
                 if failed_checks < reconnect_grace_checks:
                     master.state = ConnectionState.CONNECTING
@@ -262,11 +262,21 @@ class MasterManager:
                     continue
 
                 try:
+                    checker = getattr(session, "check_connected", None)
+                    if checker and not await checker():
+                        master.state = ConnectionState.CONNECTING
+                        continue
                     await self._publish_log(master_id, "info", f"Automatic integrity poll every {interval}s.")
                     await session.integrity_poll(master.master_address, master.outstation_address)
                 except Exception as exc:
-                    await self._publish_log(master_id, "warning", f"Automatic integrity poll failed: {exc}")
-                    await self._publish_traffic(master_id, "ERR", "Automatic integrity poll failed", "NATIVE-OPENDNP3-AUTO-POLL-ERROR")
+                    message = str(exc)
+                    if "reconnecting" in message or "channel_not_open" in message:
+                        master.state = ConnectionState.CONNECTING
+                        await self._publish_log(master_id, "info", "Automatic integrity poll skipped while channel reconnects.")
+                        await self._publish_traffic(master_id, "ERR", "Automatic poll skipped while channel reconnects", "NATIVE-OPENDNP3-AUTO-POLL-SKIPPED")
+                    else:
+                        await self._publish_log(master_id, "warning", f"Automatic integrity poll failed: {exc}")
+                        await self._publish_traffic(master_id, "ERR", "Automatic integrity poll failed", "NATIVE-OPENDNP3-AUTO-POLL-ERROR")
         except asyncio.CancelledError:
             return
 

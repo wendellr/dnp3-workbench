@@ -203,7 +203,16 @@ class NativeMasterRuntimeSession(BaseDNP3MasterSession):
     async def integrity_poll(self, master_addr: int, outstation_addr: int) -> list[dict]:
         await self._emit_log("info", f"Integrity poll requested MA={master_addr} OA={outstation_addr}.")
         await self._emit_traffic("TX", "Class 0/1/2/3 integrity poll request", "NATIVE-OPENDNP3-INTEGRITY-POLL")
-        result = await self._post(f"/masters/{self.client_id}/poll/integrity", {}, timeout=10.0)
+        try:
+            result = await self._post(f"/masters/{self.client_id}/poll/integrity", {}, timeout=10.0)
+        except MasterRuntimeError as exc:
+            message = str(exc)
+            if "501" in message or "channel_not_open" in message:
+                self.connected = False
+                await self._emit_log("warning", "Integrity poll skipped because the OpenDNP3 channel is reconnecting.")
+                await self._emit_traffic("ERR", "Integrity poll skipped while channel reconnects", "NATIVE-OPENDNP3-POLL-SKIPPED")
+                raise MasterRuntimeError("OpenDNP3 channel is reconnecting; poll skipped.") from exc
+            raise
         await self._emit_runtime_events(result.get("events", []))
         raw_points = result.get("points", [])
         if not raw_points:
