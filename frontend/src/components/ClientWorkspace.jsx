@@ -1,5 +1,5 @@
-import React, { useState } from 'react'
-import { Box, Tabs, Tab, Button, ButtonGroup, Chip } from '@mui/material'
+import React, { useEffect, useRef, useState } from 'react'
+import { Alert, Box, Snackbar, Tabs, Tab, Button, ButtonGroup, Chip } from '@mui/material'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import StopIcon from '@mui/icons-material/Stop'
 import CommConfigTab from './tabs/CommConfigTab'
@@ -10,7 +10,7 @@ import StationCommandsTab from './tabs/StationCommandsTab'
 import PointCommandsTab from './tabs/PointCommandsTab'
 import TrafficMonitorTab from './tabs/TrafficMonitorTab'
 import LogViewerTab from './tabs/LogViewerTab'
-import { api } from '../services/api'
+import { api, createMasterWebSocket } from '../services/api'
 
 const stateLabels = {
   disconnected: { label: 'Disconnected', color: 'default' },
@@ -22,9 +22,26 @@ const stateLabels = {
 export default function ClientWorkspace({ client, onClientUpdated, onRefresh }) {
   const [tab, setTab] = useState(0)
   const [loading, setLoading] = useState(false)
+  const [toast, setToast] = useState(null)
+  const shownDiagnosticsRef = useRef(new Set())
 
   const isConnected = client.state === 'connected'
   const stateInfo = stateLabels[client.state] || stateLabels.disconnected
+
+  useEffect(() => {
+    const ws = createMasterWebSocket(client.id, 'logs')
+    ws.onmessage = (event) => {
+      const entry = JSON.parse(event.data)
+      const message = entry.message || ''
+      if (!message.includes('DNP3 address mismatch detected')) return
+
+      const diagnosticKey = `${client.id}:${message}`
+      if (shownDiagnosticsRef.current.has(diagnosticKey)) return
+      shownDiagnosticsRef.current.add(diagnosticKey)
+      setToast({ severity: 'warning', message })
+    }
+    return () => ws.close()
+  }, [client.id])
 
   const handleConnect = async () => {
     setLoading(true)
@@ -113,6 +130,17 @@ export default function ClientWorkspace({ client, onClientUpdated, onRefresh }) 
           {tab === 7 && <LogViewerTab client={client} />}
         </Box>
       </Box>
+
+      <Snackbar
+        open={Boolean(toast)}
+        autoHideDuration={12000}
+        onClose={() => setToast(null)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+      >
+        <Alert severity={toast?.severity || 'info'} onClose={() => setToast(null)} sx={{ maxWidth: 620 }}>
+          {toast?.message}
+        </Alert>
+      </Snackbar>
     </Box>
   )
 }

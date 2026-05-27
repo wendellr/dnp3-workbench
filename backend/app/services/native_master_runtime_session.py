@@ -3,6 +3,7 @@ DNP3 master session backed by the native OpenDNP3 runtime service.
 """
 
 import asyncio
+import re
 import time
 from collections import defaultdict
 from typing import Callable, Optional
@@ -34,6 +35,9 @@ class NativeMasterRuntimeSession(BaseDNP3MasterSession):
     ):
         super().__init__(client_id, on_traffic, on_log, on_data_update)
         self._emitted_runtime_events: set[tuple[str, str, str, str]] = set()
+        self._emitted_diagnostics: set[str] = set()
+        self.expected_master_address: int | None = None
+        self.expected_outstation_address: int | None = None
 
     async def _get(self, path: str, timeout: float = 3.0) -> dict:
         return await asyncio.to_thread(master_runtime_get, path, timeout)
@@ -86,6 +90,7 @@ class NativeMasterRuntimeSession(BaseDNP3MasterSession):
             level = level_aliases.get(str(status).lower(), "info")
             await self._emit_log(level, f"{event_type} [{status}]: {detail}".strip())
             if event_type == "opendnp3_log":
+                await self._emit_opendnp3_diagnostic(str(detail))
                 status_text = str(status).lower()
                 if level == "error":
                     direction = "ERR"
@@ -94,6 +99,35 @@ class NativeMasterRuntimeSession(BaseDNP3MasterSession):
                 else:
                     direction = "RX"
                 await self._emit_traffic(direction, f"OpenDNP3 low-level log [{status}]: {detail}", "NATIVE-OPENDNP3-LOWLEVEL")
+
+    async def _emit_opendnp3_diagnostic(self, detail: str):
+        unknown_route = re.search(r"unknown route,\s*source:\s*(\d+),\s*dest\s*(\d+)", detail, re.IGNORECASE)
+        if not unknown_route:
+            return
+
+        received_source = int(unknown_route.group(1))
+        received_dest = int(unknown_route.group(2))
+        diagnostic_key = f"unknown-route:{received_source}:{received_dest}"
+        if diagnostic_key in self._emitted_diagnostics:
+            return
+
+        self._emitted_diagnostics.add(diagnostic_key)
+        expected_master = self.expected_master_address
+        expected_outstation = self.expected_outstation_address
+        message = (
+            "DNP3 address mismatch detected: received a link-layer frame "
+            f"from source {received_source} to destination {received_dest}. "
+        )
+        if expected_master is not None and expected_outstation is not None:
+            message += (
+                f"This master is configured as MA={expected_master} and OA={expected_outstation}. "
+                f"Use Master Address {received_dest} and Outstation Address {received_source} if this remote endpoint is correct."
+            )
+        else:
+            message += "Check the configured Master Address and Outstation Address."
+
+        await self._emit_log("warning", message)
+        await self._emit_traffic("ERR", message, "NATIVE-OPENDNP3-ADDRESS-MISMATCH")
 
     def _normalize_points(self, points: list[dict]) -> list[dict]:
         latest_by_point = {}
@@ -148,6 +182,9 @@ class NativeMasterRuntimeSession(BaseDNP3MasterSession):
             "master_address": int(master_addr),
             "outstation_address": int(outstation_addr),
         }
+        self.expected_master_address = int(master_addr)
+        self.expected_outstation_address = int(outstation_addr)
+        self._emitted_diagnostics.clear()
         await self._emit_log(
             "info",
             f"Creating native OpenDNP3 master for {payload['host']}:{payload['port']} "
