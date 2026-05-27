@@ -426,7 +426,34 @@ OpenDnp3MasterResult OpenDnp3MasterBridge::integrity_poll(const std::string& id)
     }
 
     master->ScanClasses(opendnp3::ClassField::AllClasses(), soe_handler);
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+    std::size_t last_point_count = 0;
+    int stable_checks = 0;
+    bool received = false;
+    for (int i = 0; i < 100; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto cache_it = caches_.find(id);
+        if (cache_it == caches_.end()) {
+            break;
+        }
+
+        const auto point_count = cache_it->second.points.size();
+        received = cache_it->second.response_received || received;
+        if (received && point_count == last_point_count) {
+            ++stable_checks;
+            if (stable_checks >= 5) {
+                append_event(
+                    cache_it->second.events,
+                    event_json("integrity_poll", "settled", "Poll collection settled with " + std::to_string(point_count) + " raw point sample(s)")
+                );
+                break;
+            }
+        } else {
+            stable_checks = 0;
+            last_point_count = point_count;
+        }
+    }
     return snapshot(id);
 #else
     return {false, false, "OpenDNP3 master bridge is not available in this build.", {}, {}};
