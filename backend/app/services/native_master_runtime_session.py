@@ -33,6 +33,7 @@ class NativeMasterRuntimeSession(BaseDNP3MasterSession):
         on_data_update: Optional[Callable] = None,
     ):
         super().__init__(client_id, on_traffic, on_log, on_data_update)
+        self._emitted_runtime_events: set[tuple[str, str, str, str]] = set()
 
     async def _get(self, path: str, timeout: float = 3.0) -> dict:
         return await asyncio.to_thread(master_runtime_get, path, timeout)
@@ -66,7 +67,15 @@ class NativeMasterRuntimeSession(BaseDNP3MasterSession):
             event_type = event.get("type", "runtime")
             status = event.get("status", "info")
             detail = event.get("detail", "")
-            await self._emit_log(status, f"{event_type}: {detail}".strip())
+            timestamp = event.get("timestamp", "")
+            event_key = (str(timestamp), str(event_type), str(status), str(detail))
+            if event_key in self._emitted_runtime_events:
+                continue
+            self._emitted_runtime_events.add(event_key)
+            if len(self._emitted_runtime_events) > 2000:
+                self._emitted_runtime_events = set(list(self._emitted_runtime_events)[-1000:])
+            level = status if status in {"debug", "info", "warning", "error"} else "info"
+            await self._emit_log(level, f"{event_type} [{status}]: {detail}".strip())
 
     def _normalize_points(self, points: list[dict]) -> list[dict]:
         latest_by_point = {}
@@ -214,7 +223,10 @@ class NativeMasterRuntimeSession(BaseDNP3MasterSession):
         return points
 
     async def class_poll(self, class_num: int, master_addr: int, outstation_addr: int) -> list[dict]:
-        await self._emit_log("warning", f"Class {class_num} poll is mapped to integrity poll in the native runtime.")
+        await self._emit_log(
+            "info",
+            f"Class {class_num} poll requested; native runtime currently executes an all-class scan.",
+        )
         return await self.integrity_poll(master_addr, outstation_addr)
 
     async def time_sync(self, master_addr: int, outstation_addr: int):
